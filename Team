@@ -136,6 +136,8 @@ nano ssh_key.txt
 Copy from Begin line to end line, paste in new file and remove all #.
 Save it in a new file dale_key.key
 
+chmod 600 dale_key.key
+
 ssh -i dale_key.key dale@team.thm
 
 You now have a shell:
