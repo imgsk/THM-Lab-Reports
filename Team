@@ -167,6 +167,7 @@ We now have a shell as gyles:
 whoami
 id
 groups
+python3 -c "import pty; pty.spawn('/bin/bash')"
 
 (Lets try to do priv escalation to root from glyes)
 cat /etc/crontab
